@@ -116,4 +116,4 @@ for the awesome help and repo this project is based on ^-^
 
 ## License
 
-This project is licensed under the [MIT License](LICENSE), allowing for both personal and commercial use.
+This project is licensed under the [GPL-3.0 License](LICENSE).

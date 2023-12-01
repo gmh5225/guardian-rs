@@ -146,7 +146,7 @@ impl Opcode {
             Opcode::VmSub => export_map.get("vm_sub_handler")?,
             Opcode::VmReloc => export_map.get("vm_reloc_handler")?,
             Opcode::VmExec => export_map.get("vm_exec_handler")?,
-            Opcode::VmExit => export_map.get("vmexit_threaded2")?,
+            Opcode::VmExit => export_map.get("vmexit_threaded")?,
         };
 
         match thunk_data {

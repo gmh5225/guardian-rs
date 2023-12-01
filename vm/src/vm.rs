@@ -46,15 +46,7 @@ global_asm!(include_str!("vm.asm"),
     cpustack_offset = const CPU_STACK_OFFSET,
 );
 
-// see shared -> XSaveMin
-#[allow(improper_ctypes)]
-extern "C" {
-    pub fn vmexit_threaded(vm: *mut Machine) -> *mut Machine;
-}
-
-// see shared -> XSaveMin
-#[allow(improper_ctypes)]
 #[no_mangle]
-unsafe extern "C" fn vmexit_threaded2(vm: *mut Machine) -> *mut Machine {
-    vmexit_threaded(vm)
+unsafe extern "C" fn vmexit_threaded(vm: *mut Machine) -> *mut Machine {
+    vm
 }

@@ -1,5 +1,4 @@
 .global vmentry
-.global vmexit_threaded
 
 // https://learn.microsoft.com/en-us/cpp/build/x64-calling-convention?view=msvc-170&viewFallbackFrom=vs-2019#callercallee-saved-registers
 .macro pushvol
@@ -148,8 +147,4 @@ vmexit:
     mov r15, [rcx + {r15}] // non vol
     mov rcx, [rcx + {rcx}]
     add rsp, {sizeof_machine} + 8
-    ret
-
-vmexit_threaded:
-    mov rax, rcx
     ret

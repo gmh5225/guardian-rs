@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::ptr::read_unaligned;
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use exe::{ExportDirectory, RVA, ThunkData, VecPE};
 
 use crate::shared::*;
@@ -80,7 +80,7 @@ impl Instruction {
             }
             Opcode::VmExec => {
                 buffer.push(self.instr_size.unwrap());
-                buffer.extend_from_slice(&self.instr.as_ref().unwrap());
+                buffer.extend_from_slice(self.instr.as_ref().unwrap());
             }
             Opcode::Const | Opcode::VmReloc => {
                 let value = self.value.unwrap();
@@ -156,7 +156,7 @@ impl Opcode {
     }
 }
 
-pub fn convert_to_threaded_code(vm: &VecPE, vm_section: RVA, program: &[u8]) -> Vec<u8> {
+pub fn convert_to_threaded_code(vm: &VecPE, vm_section: RVA, program: &[u8]) -> anyhow::Result<Vec<u8>> {
     let mut offset_map = HashMap::<usize, usize>::new();
     let mut new_offset_map = HashMap::<usize, usize>::new();
     let mut pc = program.as_ptr();
@@ -164,18 +164,20 @@ pub fn convert_to_threaded_code(vm: &VecPE, vm_section: RVA, program: &[u8]) -> 
 
     let mut obfuscated = Vec::new();
 
-    let first_inst = Opcode::try_from(unsafe { pc.read_unaligned() }).unwrap();
-    obfuscated
-        .extend_from_slice(&(first_inst.get_handler(vm, vm_section).unwrap() as u64).to_le_bytes());
+    let first_inst = Opcode::try_from(unsafe { pc.read_unaligned() })
+        .map_err(|_| anyhow!("invalid bytecode"))?;
+    let first_handler = first_inst.get_handler(vm, vm_section)
+        .ok_or(anyhow!("handler for '{:?}' not found", first_inst))?;
+    obfuscated.extend_from_slice(&(first_handler as u64).to_le_bytes());
 
     while pc < program.as_ptr_range().end {
-        let mut instr = unsafe { Instruction::from_ptr(pc) }.unwrap();
+        let mut instr = unsafe { Instruction::from_ptr(pc) }
+            .ok_or(anyhow!("invalid instruction"))?;
         offset_map.insert(obfuscated.len(), index);
         new_offset_map.insert(index, obfuscated.len());
 
         if let Some(next_instr) = unsafe { Instruction::from_ptr(pc.add(instr.length())) } {
-            instr.next_handler = next_instr
-                .op_code
+            instr.next_handler = next_instr.op_code
                 .get_handler(vm, vm_section)
                 .map(|x| x as u64);
             obfuscated.extend_from_slice(&instr.encode_obf());
@@ -192,18 +194,24 @@ pub fn convert_to_threaded_code(vm: &VecPE, vm_section: RVA, program: &[u8]) -> 
 
     while pc < obfuscated.as_ptr_range().end {
         if let Some(old_offset) = offset_map.get(&index) {
-            if Opcode::try_from(program[*old_offset]).unwrap() == Opcode::Jmp {
-                let jmp_target = unsafe { pc.add(2).cast::<i64>().read_unaligned() };
+            let op_code = Opcode::try_from(program[*old_offset])
+                .map_err(|_| anyhow!("invalid instruction"))?;
+            if op_code == Opcode::Jmp {
+                // skip op_size and jmp_cond
+                pc = unsafe { pc.add(2) };
+
+                let jmp_target = unsafe { pc.cast::<i64>().read_unaligned() };
                 let jmp_offset = (*old_offset as i64).wrapping_sub(jmp_target) as usize;
+                let new_offset = *new_offset_map.get(&jmp_offset)
+                    .ok_or(anyhow!("couldn't translate jmp_offset"))?;
 
                 unsafe {
-                    pc.add(2).cast_mut().cast::<u64>().write_unaligned(
-                        index.wrapping_sub(*new_offset_map.get(&jmp_offset).unwrap()) as _,
-                    );
+                    let jmp_addr =  pc.cast_mut().cast::<u64>();
+                    jmp_addr.write_unaligned(index.wrapping_sub(new_offset) as u64);
                 }
-                // u8, u8, u8, u64 = 11
-                index += 11;
-                pc = unsafe { pc.add(11) };
+                // op_size u8, jmp_cond u8, jmp_target u64 = 10
+                index += 10;
+                pc = unsafe { pc.add(8) };
                 continue;
             }
         }
@@ -212,7 +220,7 @@ pub fn convert_to_threaded_code(vm: &VecPE, vm_section: RVA, program: &[u8]) -> 
         pc = unsafe { pc.add(1) };
     }
 
-    obfuscated
+    Ok(obfuscated)
 }
 
 pub fn disassemble(program: &[u8]) -> Result<String> {

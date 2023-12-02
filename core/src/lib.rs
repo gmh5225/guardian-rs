@@ -37,13 +37,13 @@ struct VirtualizedRoutine {
 }
 
 trait PeExt {
-    fn add_section_with_data(&mut self, section: &ImageSectionHeader, data: &Vec<u8>)
+    fn add_section_with_data(&mut self, section: &ImageSectionHeader, data: &[u8])
         -> Result<ImageSectionHeader, Error>;
 }
 
 impl PeExt for VecPE {
-    fn add_section_with_data(&mut self, section: &ImageSectionHeader, data: &Vec<u8>) -> Result<ImageSectionHeader, Error> {
-        let new_section = self.append_section(section)?.clone();
+    fn add_section_with_data(&mut self, section: &ImageSectionHeader, data: &[u8]) -> Result<ImageSectionHeader, Error> {
+        let new_section = *self.append_section(section)?;
         self.append(data);
         self.pad_to_alignment().unwrap();
         self.fix_image_size().unwrap();
@@ -109,7 +109,7 @@ impl Obfuscator {
             vec![0x00u8; export_dir.size as usize],
         )?;
 
-        let vm_file_text = vm_file.get_section_by_name(".text").unwrap().clone();
+        let vm_file_text = *vm_file.get_section_by_name(".text").unwrap();
         let machine_entry = vm_file.get_entrypoint().unwrap();
 
         let machine = vm_file.read(vm_file_text.data_offset(self.pe.get_type()), vm_file_text.size_of_raw_data as _)
@@ -124,7 +124,7 @@ impl Obfuscator {
             | SectionCharacteristics::CNT_CODE;
 
         let vm_section = self.pe
-            .add_section_with_data(&vm_section, &machine.to_vec())?;
+            .add_section_with_data(&vm_section, &machine)?;
 
         let (bytecode, virtualized_fns) = self.virtualize_fns(
             RVA(vm_section.virtual_address.0 - 0x1000),
@@ -166,17 +166,19 @@ impl Obfuscator {
                 self.pe.get_image_base().unwrap() + function.rva.0 as u64,
                 target_function,
             )?;
+
             virtualized_fns.push(VirtualizedRoutine {
-                routine: Routine { rva: RVA(function.rva.0 as u32), len: function.len },
+                routine: Routine { rva: RVA(function.rva.0), len: function.len },
                 bytecode_rva: RVA(bytecode.len() as u32),
             });
 
             if self.obfuscation {
-                let mut converted = convert_to_threaded_code(vm, vm_section, virtualized_function.as_slice());
+                let mut converted = convert_to_threaded_code(vm, vm_section, virtualized_function.as_slice())?;
                 bytecode.append(&mut converted);
             } else {
                 bytecode.append(&mut virtualized_function);
             }
+
             virtualizer.reset();
         }
 
